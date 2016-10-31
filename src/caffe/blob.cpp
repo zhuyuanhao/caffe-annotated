@@ -19,6 +19,10 @@ void Blob<Dtype>::Reshape(const int num, const int channels, const int height,
   Reshape(shape);
 }
 
+// 根据shape的大小，修改内部的数据
+// 重新设置内部的count,capacity,shape_,shape_data_
+// 根据数据容量大小判断是否要重新申请shape_data_,data_/diff_的SyncedMemory
+// 注意此时重新申请的data_/diff_内部的SyncedMemory是没有申请内存的
 template <typename Dtype>
 void Blob<Dtype>::Reshape(const vector<int>& shape) {
   CHECK_LE(shape.size(), kMaxBlobAxes);
@@ -28,6 +32,7 @@ void Blob<Dtype>::Reshape(const vector<int>& shape) {
     shape_data_.reset(new SyncedMemory(shape.size() * sizeof(int)));
   }
   int* shape_data = static_cast<int*>(shape_data_->mutable_cpu_data());
+  // 重置数据大小
   for (int i = 0; i < shape.size(); ++i) {
     CHECK_GE(shape[i], 0);
     if (count_ != 0) {
@@ -37,8 +42,10 @@ void Blob<Dtype>::Reshape(const vector<int>& shape) {
     shape_[i] = shape[i];
     shape_data[i] = shape[i];
   }
+  // 按需要重新申请存储数据的SyncedMemory
   if (count_ > capacity_) {
     capacity_ = count_;
+    // share_ptr_的reset函数会释放原有的指针数据，并指向新的数据
     data_.reset(new SyncedMemory(capacity_ * sizeof(Dtype)));
     diff_.reset(new SyncedMemory(capacity_ * sizeof(Dtype)));
   }

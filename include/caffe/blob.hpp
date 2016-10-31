@@ -9,6 +9,7 @@
 #include "caffe/proto/caffe.pb.h"
 #include "caffe/syncedmem.hpp"
 
+// blob支持的最大维度是32
 const int kMaxBlobAxes = 32;
 
 namespace caffe {
@@ -26,6 +27,7 @@ class Blob {
   Blob()
        : data_(), diff_(), count_(0), capacity_(0) {}
 
+  // Blob内部会调用Reshape申请SyncedMemory，此时的SyncedMemory内部是没有申请cpu/gpu内存的
   /// @brief Deprecated; use <code>Blob(const vector<int>& shape)</code>.
   explicit Blob(const int num, const int channels, const int height,
       const int width);
@@ -51,6 +53,7 @@ class Blob {
   void Reshape(const vector<int>& shape);
   void Reshape(const BlobShape& shape);
   void ReshapeLike(const Blob& other);
+  // 返回shape的字符串表示
   inline string shape_string() const {
     ostringstream stream;
     for (int i = 0; i < shape_.size(); ++i) {
@@ -59,6 +62,8 @@ class Blob {
     stream << "(" << count_ << ")";
     return stream.str();
   }
+
+  // shape(),count(),num_axes()用于查询blob的维度或数据量大小
   inline const vector<int>& shape() const { return shape_; }
   /**
    * @brief Returns the dimension of the index-th axis (or the negative index-th
@@ -68,6 +73,8 @@ class Blob {
    *        "canonicalized" using CanonicalAxisIndex.
    *        Dies on out of range index.
    */
+  // shape()返回某个维度的大小，允许负索引，-1对应最后一维索引。
+  // count(axis, axis)会调用shape(i)，也允许负索引
   inline int shape(int index) const {
     return shape_[CanonicalAxisIndex(index)];
   }
@@ -82,6 +89,7 @@ class Blob {
    *
    * @param end_axis The first axis to exclude from the slice.
    */
+  // count(axis, axis)会调用shape(i)，允许负索引
   inline int count(int start_axis, int end_axis) const {
     CHECK_LE(start_axis, end_axis);
     CHECK_GE(start_axis, 0);
@@ -150,6 +158,7 @@ class Blob {
     return shape(index);
   }
 
+  // 将blob的多维坐标转换为实际的一维坐标
   inline int offset(const int n, const int c = 0, const int h = 0,
       const int w = 0) const {
     CHECK_GE(n, 0);
@@ -188,6 +197,7 @@ class Blob {
   void CopyFrom(const Blob<Dtype>& source, bool copy_diff = false,
       bool reshape = false);
 
+  // 返回在某个多维坐标下实际数据的值
   inline Dtype data_at(const int n, const int c, const int h,
       const int w) const {
     return cpu_data()[offset(n, c, h, w)];
@@ -206,6 +216,7 @@ class Blob {
     return cpu_diff()[offset(index)];
   }
 
+  // 返回data/diff的SyncedMemory的智能指针
   inline const shared_ptr<SyncedMemory>& data() const {
     CHECK(data_);
     return data_;
@@ -216,8 +227,10 @@ class Blob {
     return diff_;
   }
 
+  // 返回cpu/gpu_data/diff实际数据的一维指针
   const Dtype* cpu_data() const;
   void set_cpu_data(Dtype* data);
+  // 返回blob维度大小在gpu上的内存指针
   const int* gpu_shape() const;
   const Dtype* gpu_data() const;
   const Dtype* cpu_diff() const;
@@ -226,10 +239,16 @@ class Blob {
   Dtype* mutable_gpu_data();
   Dtype* mutable_cpu_diff();
   Dtype* mutable_gpu_diff();
+
+  // 计算data_ -= diff_，优先使用GPU计算，依靠SyncedMemory的内部数据同步
+  // 只有当data_的SyncedM的head在CPU上时，才使用CPU计算
   void Update();
+
+  // 用于snapshot时的序列化存储
   void FromProto(const BlobProto& proto, bool reshape = true);
   void ToProto(BlobProto* proto, bool write_diff = false) const;
 
+  // 和Update()一样，优先使用GPU上的运算
   /// @brief Compute the sum of absolute values (L1 norm) of the data.
   Dtype asum_data() const;
   /// @brief Compute the sum of absolute values (L1 norm) of the diff.
@@ -239,6 +258,7 @@ class Blob {
   /// @brief Compute the sum of squares (L2 norm squared) of the diff.
   Dtype sumsq_diff() const;
 
+  // 和Update()一样，优先使用GPU上的运算
   /// @brief Scale the blob data by a constant factor.
   void scale_data(Dtype scale_factor);
   /// @brief Scale the blob diff by a constant factor.
@@ -263,15 +283,16 @@ class Blob {
    */
   void ShareDiff(const Blob& other);
 
+  // 判断两个blob的大小是否一致
   bool ShapeEquals(const BlobProto& other);
 
  protected:
-  shared_ptr<SyncedMemory> data_;
-  shared_ptr<SyncedMemory> diff_;
-  shared_ptr<SyncedMemory> shape_data_;
-  vector<int> shape_;
-  int count_;
-  int capacity_;
+  shared_ptr<SyncedMemory> data_; // 存储网络中各层的参数
+  shared_ptr<SyncedMemory> diff_; // 存储data_的参数在BP过程中计算得到的梯度,维度、内存块大小和data_一致
+  shared_ptr<SyncedMemory> shape_data_; // 旧版本，存储data_的维度，使用SyncedMemory在CPU和GPU端都可以访问
+  vector<int> shape_; // 新版本，存储data_的维度，只能在CPU端访问
+  int count_; // 当前的data_实际使用的数据量大小
+  int capacity_; // 当前data_内部的SyncedMemory申请的内存大小
 
   DISABLE_COPY_AND_ASSIGN(Blob);
 };  // class Blob

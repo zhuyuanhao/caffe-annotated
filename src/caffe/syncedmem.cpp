@@ -5,6 +5,7 @@
 namespace caffe {
 
 SyncedMemory::~SyncedMemory() {
+  // 只有自己申请的cpu/gpu内存才释放
   if (cpu_ptr_ && own_cpu_data_) {
     CaffeFreeHost(cpu_ptr_, cpu_malloc_use_cuda_);
   }
@@ -14,7 +15,7 @@ SyncedMemory::~SyncedMemory() {
     int initial_device;
     cudaGetDevice(&initial_device);
     if (gpu_device_ != -1) {
-      CUDA_CHECK(cudaSetDevice(gpu_device_));
+      CUDA_CHECK(cudaSetDevice(gpu_device_)); // 在申请gpu内存的GPU上释放内存，并恢复initial_device的状态
     }
     CUDA_CHECK(cudaFree(gpu_ptr_));
     cudaSetDevice(initial_device);
@@ -23,6 +24,7 @@ SyncedMemory::~SyncedMemory() {
 }
 
 inline void SyncedMemory::to_cpu() {
+  // head_为UNINITIALIZED和HEAD_AT_GPU时才需要申请或同步内存
   switch (head_) {
   case UNINITIALIZED:
     CaffeMallocHost(&cpu_ptr_, size_, &cpu_malloc_use_cuda_);
@@ -32,6 +34,7 @@ inline void SyncedMemory::to_cpu() {
     break;
   case HEAD_AT_GPU:
 #ifndef CPU_ONLY
+    // HEAD_AT_GPU时，也可能没有申请过cpu内存
     if (cpu_ptr_ == NULL) {
       CaffeMallocHost(&cpu_ptr_, size_, &cpu_malloc_use_cuda_);
       own_cpu_data_ = true;
@@ -52,7 +55,7 @@ inline void SyncedMemory::to_gpu() {
 #ifndef CPU_ONLY
   switch (head_) {
   case UNINITIALIZED:
-    CUDA_CHECK(cudaGetDevice(&gpu_device_));
+    CUDA_CHECK(cudaGetDevice(&gpu_device_)); // 将gpu内存的GPU ID号保存在变量gpu_device_中
     CUDA_CHECK(cudaMalloc(&gpu_ptr_, size_));
     caffe_gpu_memset(size_, 0, gpu_ptr_);
     head_ = HEAD_AT_GPU;
@@ -78,11 +81,12 @@ inline void SyncedMemory::to_gpu() {
 
 const void* SyncedMemory::cpu_data() {
   to_cpu();
-  return (const void*)cpu_ptr_;
+  return (const void*)cpu_ptr_; // cpu/gpu_data()返回的指针不能修改内容
 }
 
 void SyncedMemory::set_cpu_data(void* data) {
   CHECK(data);
+  // 先释放自己申请的内存
   if (own_cpu_data_) {
     CaffeFreeHost(cpu_ptr_, cpu_malloc_use_cuda_);
   }
