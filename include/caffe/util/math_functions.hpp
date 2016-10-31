@@ -40,6 +40,7 @@ template <typename Dtype>
 void caffe_set(const int N, const Dtype alpha, Dtype *X);
 
 inline void caffe_memset(const size_t N, const int alpha, void* X) {
+  // "// NOLINT"注释用于忽略代码风格检查工具cpplint.py的误报
   memset(X, alpha, N);  // NOLINT(caffe/alt_fn)
 }
 

@@ -26,14 +26,19 @@ using caffe::Timer;
 using caffe::vector;
 using std::ostringstream;
 
+// Caffe支持单机多GPU的训练
 DEFINE_string(gpu, "",
     "Optional; run in GPU mode on given device IDs separated by ','."
     "Use '-gpu all' to run on all available GPUs. The effective training "
     "batch size is multiplied by the number of devices.");
+
+// solver和model用于定义模型
 DEFINE_string(solver, "",
     "The solver definition protocol buffer text file.");
 DEFINE_string(model, "",
     "The model definition protocol buffer text file.");
+
+// phase，level，stage用于动态调正模型中的某些层
 DEFINE_string(phase, "",
     "Optional; network phase (TRAIN or TEST). Only used for 'time'.");
 DEFINE_int32(level, 0,
@@ -41,13 +46,19 @@ DEFINE_int32(level, 0,
 DEFINE_string(stage, "",
     "Optional; network stages (not to be confused with phase), "
     "separated by ','.");
+
+// snapshot用于从中断中恢复，除了模型还有一些其他信息，weights从已训练的模型finetuning
 DEFINE_string(snapshot, "",
     "Optional; the snapshot solver state to resume training.");
 DEFINE_string(weights, "",
     "Optional; the pretrained weights to initialize finetuning, "
     "separated by ','. Cannot be set simultaneously with snapshot.");
+
+
 DEFINE_int32(iterations, 50,
     "The number of iterations to run.");
+
+// 指定响应键盘信号的方式
 DEFINE_string(sigint_effect, "stop",
              "Optional; action to take when a SIGINT signal is received: "
               "snapshot, stop or none.");
@@ -58,8 +69,10 @@ DEFINE_string(sighup_effect, "snapshot",
 // A simple registry for caffe commands.
 typedef int (*BrewFunction)();
 typedef std::map<caffe::string, BrewFunction> BrewMap;
-BrewMap g_brew_map;
+BrewMap g_brew_map; // 根据第一个参数的字符串，调用相应的函数。支持的字符串（函数）包括
+// device_query, train, test, time
 
+// 单独开一个namespace，只是为了注册函数到g_brew_map中???
 #define RegisterBrewFunction(func) \
 namespace { \
 class __Registerer_##func { \
@@ -192,6 +205,8 @@ int train() {
     solver_param.mutable_train_state()->add_stage(stages[i]);
   }
 
+  // 如果solver parameter中设置了GPU模式，但没有指定GPU ID，则默认使用GPU 0.
+  // 如果在命令行指定了GPU ID，则自动使用GPU模式
   // If the gpus flag is not provided, allow the mode and device to be set
   // in the solver prototxt.
   if (FLAGS_gpu.size() == 0
@@ -222,12 +237,15 @@ int train() {
       LOG(INFO) << "GPU " << gpus[i] << ": " << device_prop.name;
     }
 #endif
+
+    // device id只设置一个GPU，但solver count设置为使用的GPU数目
     solver_param.set_device_id(gpus[0]);
     Caffe::SetDevice(gpus[0]);
     Caffe::set_mode(Caffe::GPU);
     Caffe::set_solver_count(gpus.size());
   }
 
+  // 新建signalhander, solver并绑定，根据snapshot或weights判断是否初始化solver中的参数
   caffe::SignalHandler signal_handler(
         GetRequestedAction(FLAGS_sigint_effect),
         GetRequestedAction(FLAGS_sighup_effect));
@@ -245,9 +263,11 @@ int train() {
   }
 
   if (gpus.size() > 1) {
+    // 多卡时，先同步模型到各个GPU中再执行
     caffe::P2PSync<float> sync(solver, NULL, solver->param());
     sync.Run(gpus);
   } else {
+    // 单卡时，直接执行
     LOG(INFO) << "Starting Optimization";
     solver->Solve();
   }
