@@ -10,19 +10,24 @@
 namespace caffe {
 
 // Make sure each thread can have different values.
+// 全局类型在所有线程都能访问，而静态类型使变量可以在静态函数static Caffe::Get()
+// 中访问，boost::thread_specific_ptr类型对于每个线程会保存一个单独的指针。
 static boost::thread_specific_ptr<Caffe> thread_instance_;
 
+// 全局的静态的thread_instance_使static Caffe::Get()在每个线程中都是单例模式
 Caffe& Caffe::Get() {
   if (!thread_instance_.get()) {
-    thread_instance_.reset(new Caffe());
+    thread_instance_.reset(new Caffe()); // Caffe实例是分配在堆中的，理论上所有线程都能访问
   }
-  return *(thread_instance_.get());
+  return *(thread_instance_.get()); // 返回当前线程中的Caffe实例
 }
 
 // random seeding
+// 产生一个随机化种子
 int64_t cluster_seedgen(void) {
   int64_t s, seed, pid;
-  FILE* f = fopen("/dev/urandom", "rb");
+  FILE* f = fopen("/dev/urandom", "rb"); // /dev/urandom 和 /dev/random 是Linux系统中根据系统熵产生随机数的文件
+                                         // random产生不出新随机数时会阻塞，urandom不会。
   if (f && fread(&seed, 1, sizeof(seed), f) == sizeof(seed)) {
     fclose(f);
     return seed;
@@ -34,12 +39,12 @@ int64_t cluster_seedgen(void) {
     fclose(f);
 
   pid = getpid();
-  s = time(NULL);
+  s = time(NULL); // time(NULL)返回自Unix元年到现在的秒数 
   seed = std::abs(((s * 181) * ((pid - 83) * 359)) % 104729);
   return seed;
 }
 
-
+// 全局初始化函数，调用时使用argc，argv做参数
 void GlobalInit(int* pargc, char*** pargv) {
   // Google flags.
   ::gflags::ParseCommandLineFlags(pargc, pargv, true);
@@ -50,7 +55,6 @@ void GlobalInit(int* pargc, char*** pargv) {
 }
 
 #ifdef CPU_ONLY  // CPU-only Caffe.
-
 Caffe::Caffe()
     : random_generator_(), mode_(Caffe::CPU),
       solver_count_(1), root_solver_(true) { }
@@ -62,6 +66,7 @@ void Caffe::set_random_seed(const unsigned int seed) {
   Get().random_generator_.reset(new RNG(seed));
 }
 
+// 只能在GPU模式中调用的几个函数，在这里调用会报错
 void Caffe::SetDevice(const int device_id) {
   NO_GPU;
 }
@@ -109,6 +114,7 @@ Caffe::Caffe()
     mode_(Caffe::CPU), solver_count_(1), root_solver_(true) {
   // Try to create a cublas handler, and report an error if failed (but we will
   // keep the program running as one might just want to run CPU code).
+  // 初始化GPU相关元件，失败仍然继续。失败时可运行在CPU模式下
   if (cublasCreate(&cublas_handle_) != CUBLAS_STATUS_SUCCESS) {
     LOG(ERROR) << "Cannot create Cublas handle. Cublas won't be available.";
   }
@@ -146,6 +152,7 @@ void Caffe::set_random_seed(const unsigned int seed) {
   Get().random_generator_.reset(new RNG(seed));
 }
 
+// 设置当前线程所使用的GPU ID
 void Caffe::SetDevice(const int device_id) {
   int current_device;
   CUDA_CHECK(cudaGetDevice(&current_device));
@@ -166,6 +173,7 @@ void Caffe::SetDevice(const int device_id) {
       cluster_seedgen()));
 }
 
+// 查询当前线程所使用的GPU的信息
 void Caffe::DeviceQuery() {
   cudaDeviceProp prop;
   int device;
@@ -201,6 +209,7 @@ void Caffe::DeviceQuery() {
   return;
 }
 
+// 设置GPU ID并确保可用
 bool Caffe::CheckDevice(const int device_id) {
   // This function checks the availability of GPU #device_id.
   // It attempts to create a context on the device by calling cudaFree(0).
@@ -215,6 +224,7 @@ bool Caffe::CheckDevice(const int device_id) {
   // Cuda operations that initialize the context are needed to check
   // the permission. cudaFree(0) is one of those with no side effect,
   // except the context initialization.
+  // 同时使用cudaSetDevice和cudaFree函数确保设置后的GPU的确是可用的
   bool r = ((cudaSuccess == cudaSetDevice(device_id)) &&
             (cudaSuccess == cudaFree(0)));
   // reset any error that may have occurred.
@@ -222,6 +232,7 @@ bool Caffe::CheckDevice(const int device_id) {
   return r;
 }
 
+// 从start_id开始递增查找第一个可用的GPU ID，并设置当前线程为该GPU ID
 int Caffe::FindDevice(const int start_id) {
   // This function finds the first available device by checking devices with
   // ordinal from start_id to the highest available value. In the

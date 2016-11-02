@@ -11,11 +11,13 @@
 
 namespace caffe {
 
+// 设置事件响应函数
 template<typename Dtype>
 void Solver<Dtype>::SetActionFunction(ActionCallback func) {
   action_request_function_ = func;
 }
 
+// 获取事件响应函数
 template<typename Dtype>
 SolverAction::Enum Solver<Dtype>::GetRequestedAction() {
   if (action_request_function_) {
@@ -25,6 +27,9 @@ SolverAction::Enum Solver<Dtype>::GetRequestedAction() {
   return SolverAction::NONE;
 }
 
+// 初始化Solver，包含两个参数：SolverParameter变量或文件，指向root solver的指针
+// 1. 指向root_solver的指针会保存到root_solver_成员变量里
+// 2. 调用Init函数，传入SolverParameter，初始化Train Net, Test Net
 template <typename Dtype>
 Solver<Dtype>::Solver(const SolverParameter& param, const Solver* root_solver)
     : net_(), callbacks_(), root_solver_(root_solver),
@@ -43,6 +48,7 @@ Solver<Dtype>::Solver(const string& param_file, const Solver* root_solver)
 
 template <typename Dtype>
 void Solver<Dtype>::Init(const SolverParameter& param) {
+  // Caffe::root_solver_()返回bool类型，表示当前进程是否是root solver，非root solver初始化时传入一个solver的指针，标示root_solver的地址，用来初始化自己
   CHECK(Caffe::root_solver() || root_solver_)
       << "root_solver_ needs to be set for all non-root solvers";
   LOG_IF(INFO, Caffe::root_solver()) << "Initializing solver from parameters: "
@@ -56,6 +62,7 @@ void Solver<Dtype>::Init(const SolverParameter& param) {
   // Scaffolding code
   InitTrainNet();
   if (Caffe::root_solver()) {
+    // 只有root solver才需要Test Net
     InitTestNets();
     LOG(INFO) << "Solver scaffolding done.";
   }
@@ -101,6 +108,7 @@ void Solver<Dtype>::InitTrainNet() {
   net_state.MergeFrom(net_param.state());
   net_state.MergeFrom(param_.train_state());
   net_param.mutable_state()->CopyFrom(net_state);
+  // 初始化Solver的net_指针
   if (Caffe::root_solver()) {
     net_.reset(new Net<Dtype>(net_param));
   } else {
@@ -200,7 +208,9 @@ void Solver<Dtype>::Step(int iters) {
 
   while (iter_ < stop_iter) {
     // zero-init the params
+    // 每个iter，网络的梯度都设置为0
     net_->ClearParamDiffs();
+    // 每test_interval做一次Test，并且响应退出事件
     if (param_.test_interval() && iter_ % param_.test_interval() == 0
         && (iter_ > 0 || param_.test_initialization())
         && Caffe::root_solver()) {
@@ -211,13 +221,17 @@ void Solver<Dtype>::Step(int iters) {
       }
     }
 
+    // 依次调用回调对象的on_start()
     for (int i = 0; i < callbacks_.size(); ++i) {
       callbacks_[i]->on_start();
     }
+    // 每display个iter输出一个debug信息
     const bool display = param_.display() && iter_ % param_.display() == 0;
     net_->set_debug_info(display && param_.debug_info());
     // accumulate the loss and gradient
     Dtype loss = 0;
+    // 每次迭代可重复多次,共取iter_size*batch_size个数据，然后取平均loss作
+    // 为最终loss，默认重复次数为1
     for (int i = 0; i < param_.iter_size(); ++i) {
       loss += net_->ForwardBackward();
     }
@@ -247,15 +261,19 @@ void Solver<Dtype>::Step(int iters) {
         }
       }
     }
+    // 依次调用回调对象的on_gradients_ready()
     for (int i = 0; i < callbacks_.size(); ++i) {
       callbacks_[i]->on_gradients_ready();
     }
+    // 使用diff更新data参数
     ApplyUpdate();
 
     // Increment the internal iter_ counter -- its value should always indicate
     // the number of times the weights have been updated.
+    // 更新迭代次数，也反映了模型参数被更新的次数
     ++iter_;
 
+    // 调用事件响应函数，保存snapshot，或者需要通过设置reqeusted_early_exit_让程序合理退出
     SolverAction::Enum request = GetRequestedAction();
 
     // Save a snapshot if needed.
@@ -275,13 +293,16 @@ void Solver<Dtype>::Step(int iters) {
 
 template <typename Dtype>
 void Solver<Dtype>::Solve(const char* resume_file) {
+  // 只有root solver可以调用Solve函数
   CHECK(Caffe::root_solver());
   LOG(INFO) << "Solving " << net_->name();
   LOG(INFO) << "Learning Rate Policy: " << param_.lr_policy();
 
   // Initialize to false every time we start solving.
+  // 开始调用时设置为false
   requested_early_exit_ = false;
 
+  // 如果有snapshot文件，则从文件恢复
   if (resume_file) {
     LOG(INFO) << "Restoring previous solver status from " << resume_file;
     Restore(resume_file);
@@ -289,14 +310,18 @@ void Solver<Dtype>::Solve(const char* resume_file) {
 
   // For a network that is trained by the solver, no bottom or top vecs
   // should be given, and we will just provide dummy vecs.
+  // 如果调用这个默认的Solve函数实现，不应该传入bottom/top vecs??
   int start_iter = iter_;
   Step(param_.max_iter() - iter_);
   // If we haven't already, save a snapshot after optimization, unless
   // overridden by setting snapshot_after_train := false
+  // train完成后默认会保存一个snapshot，除非已保存最后迭代的snapshot或设
+  // 置snapshot_after_train := false
   if (param_.snapshot_after_train()
       && (!param_.snapshot() || iter_ % param_.snapshot() != 0)) {
     Snapshot();
   }
+  // 需要提早退出
   if (requested_early_exit_) {
     LOG(INFO) << "Optimization stopped early.";
     return;
@@ -307,6 +332,7 @@ void Solver<Dtype>::Solve(const char* resume_file) {
   // training, for the train net we only run a forward pass as we've already
   // updated the parameters "max_iter" times -- this final pass is only done to
   // display the loss, which is computed in the forward pass.
+  // 运行Forward展示最终loss结果
   if (param_.display() && iter_ % param_.display() == 0) {
     int average_loss = this->param_.average_loss();
     Dtype loss;
@@ -316,6 +342,7 @@ void Solver<Dtype>::Solve(const char* resume_file) {
 
     LOG(INFO) << "Iteration " << iter_ << ", loss = " << smoothed_loss_;
   }
+  // 
   if (param_.test_interval() && iter_ % param_.test_interval() == 0) {
     TestAll();
   }
@@ -478,6 +505,7 @@ void Solver<Dtype>::Restore(const char* state_file) {
   }
 }
 
+// 用于更新平均loss的值和最近多个loss的数组
 template <typename Dtype>
 void Solver<Dtype>::UpdateSmoothedLoss(Dtype loss, int start_iter,
     int average_loss) {

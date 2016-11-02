@@ -26,6 +26,7 @@ using caffe::Timer;
 using caffe::vector;
 using std::ostringstream;
 
+// 运行模式包含device_query, train, test, time
 // Caffe支持单机多GPU的训练
 DEFINE_string(gpu, "",
     "Optional; run in GPU mode on given device IDs separated by ','."
@@ -38,7 +39,7 @@ DEFINE_string(solver, "",
 DEFINE_string(model, "",
     "The model definition protocol buffer text file.");
 
-// phase，level，stage用于动态调正模型中的某些层
+// phase，level，stage用于动态调正模型中的某些层, NetState对象里包含了模型的phase，level，stage设置
 DEFINE_string(phase, "",
     "Optional; network phase (TRAIN or TEST). Only used for 'time'.");
 DEFINE_int32(level, 0,
@@ -147,6 +148,7 @@ vector<string> get_stages_from_flags() {
 // RegisterBrewFunction(action);
 
 // Device Query: show diagnostic information for a GPU device.
+// 查询参数中指明的GPU的信息
 int device_query() {
   LOG(INFO) << "Querying GPUs " << FLAGS_gpu;
   vector<int> gpus;
@@ -200,6 +202,7 @@ int train() {
   caffe::SolverParameter solver_param;
   caffe::ReadSolverParamsFromTextFileOrDie(FLAGS_solver, &solver_param);
 
+  // mutable_**, set_**, add_**都是protobuf生成的函数
   solver_param.mutable_train_state()->set_level(FLAGS_level);
   for (int i = 0; i < stages.size(); i++) {
     solver_param.mutable_train_state()->add_stage(stages[i]);
@@ -210,6 +213,7 @@ int train() {
   // If the gpus flag is not provided, allow the mode and device to be set
   // in the solver prototxt.
   if (FLAGS_gpu.size() == 0
+      // SolverParameter_SolverMode_GPU是pb引用枚举的方式？？
       && solver_param.solver_mode() == caffe::SolverParameter_SolverMode_GPU) {
       if (solver_param.has_device_id()) {
           FLAGS_gpu = "" +
@@ -230,6 +234,9 @@ int train() {
       s << (i ? ", " : "") << gpus[i];
     }
     LOG(INFO) << "Using GPUs " << s.str();
+// 编译时设置CPU_ONLY，则只能在CPU上运行
+// 如果没有指定，则运行时默认在GPU上执行，但也可以通过指定solver配置
+// 中的solver_mode: CPU来使用CPU模式
 #ifndef CPU_ONLY
     cudaDeviceProp device_prop;
     for (int i = 0; i < gpus.size(); ++i) {
@@ -250,11 +257,13 @@ int train() {
         GetRequestedAction(FLAGS_sigint_effect),
         GetRequestedAction(FLAGS_sighup_effect));
 
+  // 使用solver_param新建一个Solver，solver_param中包含Net的文件名
   shared_ptr<caffe::Solver<float> >
       solver(caffe::SolverRegistry<float>::CreateSolver(solver_param));
 
   solver->SetActionFunction(signal_handler.GetActionFunction());
 
+  // 从snapshot或weights中恢复模型中的参数
   if (FLAGS_snapshot.size()) {
     LOG(INFO) << "Resuming from " << FLAGS_snapshot;
     solver->Restore(FLAGS_snapshot.c_str());
@@ -278,6 +287,7 @@ RegisterBrewFunction(train);
 
 
 // Test: score a model.
+// 计算网络的loss，需要model和参数weights
 int test() {
   CHECK_GT(FLAGS_model.size(), 0) << "Need a model definition to score.";
   CHECK_GT(FLAGS_weights.size(), 0) << "Need model weights to score.";
@@ -300,6 +310,7 @@ int test() {
     Caffe::set_mode(Caffe::CPU);
   }
   // Instantiate the caffe net.
+  // 使用传入的model和weights初始化Net
   Net<float> caffe_net(FLAGS_model, caffe::TEST, FLAGS_level, &stages);
   caffe_net.CopyTrainedLayersFrom(FLAGS_weights);
   LOG(INFO) << "Running for " << FLAGS_iterations << " iterations.";
@@ -351,12 +362,14 @@ RegisterBrewFunction(test);
 
 
 // Time: benchmark the execution time of a model.
+// 测试CPU或单GPU的运算时间，需要使用model作为参数
 int time() {
   CHECK_GT(FLAGS_model.size(), 0) << "Need a model definition to time.";
   caffe::Phase phase = get_phase_from_flags(caffe::TRAIN);
   vector<string> stages = get_stages_from_flags();
 
   // Set device id and mode
+  // 可以用CPU或GPU，使用GPU时最多只能使用一个
   vector<int> gpus;
   get_gpus(&gpus);
   if (gpus.size() != 0) {
@@ -368,13 +381,16 @@ int time() {
     Caffe::set_mode(Caffe::CPU);
   }
   // Instantiate the caffe net.
+  // 初始化一个Net，而不是Solver
   Net<float> caffe_net(FLAGS_model, phase, FLAGS_level, &stages);
 
   // Do a clean forward and backward pass, so that memory allocation are done
   // and future iterations will be more stable.
+  // 测试之前先跑一遍Forward和Backward，主要用于分配数据
   LOG(INFO) << "Performing Forward";
   // Note that for the speed benchmark, we will assume that the network does
   // not take any input blobs.
+  // 测试时没有读入任何数据
   float initial_loss;
   caffe_net.Forward(&initial_loss);
   LOG(INFO) << "Initial loss: " << initial_loss;
@@ -388,17 +404,17 @@ int time() {
       caffe_net.bottom_need_backward();
   LOG(INFO) << "*** Benchmark begins ***";
   LOG(INFO) << "Testing for " << FLAGS_iterations << " iterations.";
-  Timer total_timer;
+  Timer total_timer; // 统计做完所有iter的时间，包含时间处理函数自身的时间
   total_timer.Start();
   Timer forward_timer;
   Timer backward_timer;
   Timer timer;
-  std::vector<double> forward_time_per_layer(layers.size(), 0.0);
-  std::vector<double> backward_time_per_layer(layers.size(), 0.0);
+  std::vector<double> forward_time_per_layer(layers.size(), 0.0); // 统计每一层Forward的时间
+  std::vector<double> backward_time_per_layer(layers.size(), 0.0); // 统计每一层Backward的时间
   double forward_time = 0.0;
   double backward_time = 0.0;
   for (int j = 0; j < FLAGS_iterations; ++j) {
-    Timer iter_timer;
+    Timer iter_timer; // 统计每个iter的时间
     iter_timer.Start();
     forward_timer.Start();
     for (int i = 0; i < layers.size(); ++i) {
@@ -428,7 +444,7 @@ int time() {
       "\tbackward: " << backward_time_per_layer[i] / 1000 /
       FLAGS_iterations << " ms.";
   }
-  total_timer.Stop();
+  total_timer.Stop(); // 这个timer统计了最后统计所有时间的时间
   LOG(INFO) << "Average Forward pass: " << forward_time / 1000 /
     FLAGS_iterations << " ms.";
   LOG(INFO) << "Average Backward pass: " << backward_time / 1000 /
