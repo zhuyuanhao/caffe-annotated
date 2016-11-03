@@ -198,10 +198,12 @@ void Solver<Dtype>::InitTestNets() {
   }
 }
 
+// 训练iters次batch
 template <typename Dtype>
 void Solver<Dtype>::Step(int iters) {
   const int start_iter = iter_;
   const int stop_iter = iter_ + iters;
+  
   int average_loss = this->param_.average_loss();
   losses_.clear();
   smoothed_loss_ = 0;
@@ -237,6 +239,7 @@ void Solver<Dtype>::Step(int iters) {
     }
     loss /= param_.iter_size();
     // average the loss across iterations for smoothed reporting
+    // 更新最近average_loss次的平均loss信息
     UpdateSmoothedLoss(loss, start_iter, average_loss);
     if (display) {
       LOG_IF(INFO, Caffe::root_solver()) << "Iteration " << iter_

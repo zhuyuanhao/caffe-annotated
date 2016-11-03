@@ -283,6 +283,7 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   LOG_IF(INFO, Caffe::root_solver()) << "Network initialization done.";
 }
 
+// 检查net param中的各层是否满足net state的过滤条件，将满足的放在param_filtered中
 template <typename Dtype>
 void Net<Dtype>::FilterNet(const NetParameter& param,
     NetParameter* param_filtered) {
@@ -292,10 +293,12 @@ void Net<Dtype>::FilterNet(const NetParameter& param,
   for (int i = 0; i < param.layer_size(); ++i) {
     const LayerParameter& layer_param = param.layer(i);
     const string& layer_name = layer_param.name();
+    // layer param中不能同时又include选项和exlude选项
     CHECK(layer_param.include_size() == 0 || layer_param.exclude_size() == 0)
           << "Specify either include rules or exclude rules; not both.";
     // If no include rules are specified, the layer is included by default and
     // only excluded if it meets one of the exclude rules.
+    // 默认是include的
     bool layer_included = (layer_param.include_size() == 0);
     for (int j = 0; layer_included && j < layer_param.exclude_size(); ++j) {
       if (StateMeetsRule(net_state, layer_param.exclude(j), layer_name)) {
@@ -307,16 +310,19 @@ void Net<Dtype>::FilterNet(const NetParameter& param,
         layer_included = true;
       }
     }
+    // 包含则添加该层到param_filtered中
     if (layer_included) {
       param_filtered->add_layer()->CopyFrom(layer_param);
     }
   }
 }
 
+// 检查某一层的某组phase/level/stage/not_stage规则是否满足netstate条件
 template <typename Dtype>
 bool Net<Dtype>::StateMeetsRule(const NetState& state,
     const NetStateRule& rule, const string& layer_name) {
   // Check whether the rule is broken due to phase.
+  // phase通过是否相等判断
   if (rule.has_phase()) {
       if (rule.phase() != state.phase()) {
         LOG_IF(INFO, Caffe::root_solver())
@@ -327,6 +333,7 @@ bool Net<Dtype>::StateMeetsRule(const NetState& state,
       }
   }
   // Check whether the rule is broken due to min level.
+  // level通过net的level是否在layer param的min_level,max_level之间判断
   if (rule.has_min_level()) {
     if (state.level() < rule.min_level()) {
       LOG_IF(INFO, Caffe::root_solver())
@@ -348,6 +355,7 @@ bool Net<Dtype>::StateMeetsRule(const NetState& state,
   }
   // Check whether the rule is broken due to stage. The NetState must
   // contain ALL of the rule's stages to meet it.
+  // stage通过layer param的stages是否全部都在net的stages中
   for (int i = 0; i < rule.stage_size(); ++i) {
     // Check that the NetState contains the rule's ith stage.
     bool has_stage = false;
@@ -363,6 +371,7 @@ bool Net<Dtype>::StateMeetsRule(const NetState& state,
   }
   // Check whether the rule is broken due to not_stage. The NetState must
   // contain NONE of the rule's not_stages to meet it.
+  // not stage通过layer param的not stages是否全都没有在net的stages中
   for (int i = 0; i < rule.not_stage_size(); ++i) {
     // Check that the NetState contains the rule's ith not_stage.
     bool has_stage = false;
@@ -921,6 +930,7 @@ void Net<Dtype>::ToHDF5(const string& filename, bool write_diff) const {
   H5Fclose(file_hid);
 }
 
+// 在Solver将learnable blob的diff都更新好后，调用每一层的参数更新函数
 template <typename Dtype>
 void Net<Dtype>::Update() {
   for (int i = 0; i < learnable_params_.size(); ++i) {
@@ -928,6 +938,7 @@ void Net<Dtype>::Update() {
   }
 }
 
+// 每次iter之前调用，清除所有learnable blob的diff
 template <typename Dtype>
 void Net<Dtype>::ClearParamDiffs() {
   for (int i = 0; i < learnable_params_.size(); ++i) {
@@ -949,6 +960,7 @@ void Net<Dtype>::ClearParamDiffs() {
   }
 }
 
+// 将同一个网络中相互共享参数的blob的内部数据指针设置为拥有参数的blob的内部数据地址
 template <typename Dtype>
 void Net<Dtype>::ShareWeights() {
   for (int i = 0; i < params_.size(); ++i) {
@@ -963,6 +975,7 @@ bool Net<Dtype>::has_blob(const string& blob_name) const {
   return blob_names_index_.find(blob_name) != blob_names_index_.end();
 }
 
+// 通过blob名称查找blob
 template <typename Dtype>
 const shared_ptr<Blob<Dtype> > Net<Dtype>::blob_by_name(
     const string& blob_name) const {
@@ -981,6 +994,7 @@ bool Net<Dtype>::has_layer(const string& layer_name) const {
   return layer_names_index_.find(layer_name) != layer_names_index_.end();
 }
 
+// 通过layer名称查找layer
 template <typename Dtype>
 const shared_ptr<Layer<Dtype> > Net<Dtype>::layer_by_name(
     const string& layer_name) const {

@@ -50,18 +50,23 @@ namespace caffe {
 template <typename Dtype>
 class Solver;
 
+// 所有函数和存储数据的对象都是静态的
 template <typename Dtype>
 class SolverRegistry {
  public:
+  // 定义Creator是一个函数指针，以SolverParameter为参数，返回一个Solver的指针
   typedef Solver<Dtype>* (*Creator)(const SolverParameter&);
+  // 定义存储Solver的<名称,Creator>对的结构
   typedef std::map<string, Creator> CreatorRegistry;
 
+  // 返回Solver名/值的静态字典，因为是静态字典，只会在首次调用时初始化一次
   static CreatorRegistry& Registry() {
     static CreatorRegistry* g_registry_ = new CreatorRegistry();
     return *g_registry_;
   }
 
   // Adds a creator.
+  // 注册一个Creator到字典中
   static void AddCreator(const string& type, Creator creator) {
     CreatorRegistry& registry = Registry();
     CHECK_EQ(registry.count(type), 0)
@@ -70,6 +75,7 @@ class SolverRegistry {
   }
 
   // Get a solver using a SolverParameter.
+  // 按字符串名称查找字典，并调用对应的Creator创建对应的Solver对象
   static Solver<Dtype>* CreateSolver(const SolverParameter& param) {
     const string& type = param.type();
     CreatorRegistry& registry = Registry();
@@ -78,6 +84,7 @@ class SolverRegistry {
     return registry[type](param);
   }
 
+  // 返回注册的Solver的名称数组
   static vector<string> SolverTypeList() {
     CreatorRegistry& registry = Registry();
     vector<string> solver_types;
@@ -93,7 +100,9 @@ class SolverRegistry {
   // static variables.
   SolverRegistry() {}
 
+  // 返回注册的Solver的名称的字符串
   static string SolverTypeListString() {
+    // 获得注册的Solver的名称数组
     vector<string> solver_types = SolverTypeList();
     string solver_types_str;
     for (vector<string>::iterator iter = solver_types.begin();
@@ -108,6 +117,8 @@ class SolverRegistry {
 };
 
 
+// 用于注册的类，每生成一个对象，就把对应的creator和它的名称type在SolverRegistry的
+// 静态函数Registry的静态map对象g_registry_里注册
 template <typename Dtype>
 class SolverRegisterer {
  public:
@@ -118,11 +129,12 @@ class SolverRegisterer {
   }
 };
 
-
+// 调用注册的类SolverRegisterer来注册Solver
 #define REGISTER_SOLVER_CREATOR(type, creator)                                 \
   static SolverRegisterer<float> g_creator_f_##type(#type, creator<float>);    \
   static SolverRegisterer<double> g_creator_d_##type(#type, creator<double>)   \
 
+// 注册Solver，先声明对应的Creator函数对象，然后注册
 #define REGISTER_SOLVER_CLASS(type)                                            \
   template <typename Dtype>                                                    \
   Solver<Dtype>* Creator_##type##Solver(                                       \

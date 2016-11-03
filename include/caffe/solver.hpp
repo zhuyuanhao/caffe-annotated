@@ -43,6 +43,7 @@ typedef boost::function<SolverAction::Enum()> ActionCallback;
 template <typename Dtype>
 class Solver {
  public:
+  // 初始化函数
   explicit Solver(const SolverParameter& param, const Solver* root_solver = NULL);
   explicit Solver(const string& param_file, const Solver* root_solver = NULL);
   void Init(const SolverParameter& param);
@@ -58,10 +59,10 @@ class Solver {
   SolverAction::Enum GetRequestedAction();
   // The main entry of the solver function. In default, iter will be zero. Pass
   // in a non-zero iter number to resume training for a pre-trained net.
-  // Solver的主要函数，用于开始训练网络，是一个虚函数。
+  // Solver的主要函数，用于开始训练网络，是一个虚函数。内部会调用Step函数作实际的训练
   virtual void Solve(const char* resume_file = NULL);
   inline void Solve(const string resume_file) { Solve(resume_file.c_str()); }
-  // iters表示训练的iter数
+  // iters表示一共训练多少个iter
   void Step(int iters);
   // The Restore method simply dispatches to one of the
   // RestoreSolverStateFrom___ protected methods. You should implement these
@@ -75,7 +76,7 @@ class Solver {
   // 将当前solver状态保存到snapshot文件
   void Snapshot();
   virtual ~Solver() {}
-  // 返回当前Solver的状态，param, net, test_net, iter
+  // 返回当前Solver的状态
   inline const SolverParameter& param() const { return param_; }
   inline shared_ptr<Net<Dtype> > net() { return net_; }
   inline const vector<shared_ptr<Net<Dtype> > >& test_nets() {
@@ -99,6 +100,7 @@ class Solver {
     callbacks_.push_back(value);
   }
 
+  // 检查是否有snapshot文件指定的目录存在且有写权限
   void CheckSnapshotWritePermissions();
   /**
    * @brief Returns the solver type.
@@ -128,14 +130,14 @@ class Solver {
 
   // 保存Solver的所有配置参数
   SolverParameter param_;
-  // 保持当前训练的迭代次数，初始化时为0，也可以手动设置
+  // 保持当前训练的迭代次数，初始化时为0
   int iter_;
   int current_step_;
   // solver中的Net的指针
   shared_ptr<Net<Dtype> > net_;
-  // 测试网络的数组
+  // 测试网络的指针数组
   vector<shared_ptr<Net<Dtype> > > test_nets_;
-  // 的数组
+  // 训练前后回调函数对象的数组
   vector<Callback*> callbacks_;
   // 用于保存最近的SolverParameter.average_loss个loss的数组，这样display时给出的是最近average_loss的平均值smoothed_loss_
   vector<Dtype> losses_;
@@ -148,9 +150,11 @@ class Solver {
 
   // A function that can be set by a client of the Solver to provide indication
   // that it wants a snapshot saved and/or to exit early.
+  // 定义对事件产生何种响应的函数
   ActionCallback action_request_function_;
 
   // True iff a request to stop early was received.
+  // 判断是否要提前退出，程序有部分位置会检查这个变量
   bool requested_early_exit_;
 
   DISABLE_COPY_AND_ASSIGN(Solver);

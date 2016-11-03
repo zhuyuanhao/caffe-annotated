@@ -23,6 +23,7 @@ namespace caffe {
 template <typename Dtype>
 class Net {
  public:
+  // 初始化相关函数，会设置root net的指针，根据过滤后的net param设置各种参数
   explicit Net(const NetParameter& param, const Net* root_net = NULL);
   explicit Net(const string& param_file, Phase phase,
       const int level = 0, const vector<string>* stages = NULL,
@@ -307,6 +308,7 @@ class Net {
   /// Whether to compute and display debug info for the net.
   bool debug_info_;
   /// The root net that actually holds the shared layers in data parallelism
+  // root net的指针，自己是root net时为NULL，否则必须指向root net。在数据并行时，实际上保存共享层数据的net
   const Net* const root_net_;
   DISABLE_COPY_AND_ASSIGN(Net);
 };
