@@ -21,12 +21,14 @@
 
 namespace caffe {
 
+// 初始化，NetParameter里包含Net状态和Net网络
 template <typename Dtype>
 Net<Dtype>::Net(const NetParameter& param, const Net* root_net)
     : root_net_(root_net) {
   Init(param);
 }
 
+// 使用Net文件和过滤参数初始化
 template <typename Dtype>
 Net<Dtype>::Net(const string& param_file, Phase phase,
     const int level, const vector<string>* stages,
@@ -45,8 +47,10 @@ Net<Dtype>::Net(const string& param_file, Phase phase,
   Init(param);
 }
 
+// 完成实际的初始化工作
 template <typename Dtype>
 void Net<Dtype>::Init(const NetParameter& in_param) {
+  // 自己时root solver或者root_net_有值（指向root_solver的net）
   CHECK(Caffe::root_solver() || root_net_)
       << "root_net_ needs to be set for all non-root solvers";
   // Set phase from the state.
@@ -54,67 +58,86 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   // Filter layers based on their include/exclude rules and
   // the current NetState.
   NetParameter filtered_param;
+  // 根据Net网络中的include/exclude信息，使用Net状态进行过滤
   FilterNet(in_param, &filtered_param);
   LOG_IF(INFO, Caffe::root_solver())
       << "Initializing net from parameters: " << std::endl
       << filtered_param.DebugString();
   // Create a copy of filtered_param with splits added where necessary.
   NetParameter param;
+  // 增加split layer，对每层的每个top blob，如果被作为其他层的bottom blob和作为loss的总数大于1次
+  // 则增加一个split层，将这个top blob输入，输出多个top blob
   InsertSplits(filtered_param, &param);
   // Basically, build all the layers and set up their connections.
   name_ = param.name();
+  // 使用本地的字典和集合来保存已经添加的blob的信息
+  // 这些blob会在Net的blobs_和top_vecs_, bottom_vecs_中注册
   map<string, int> blob_name_to_idx;
-  set<string> available_blobs;
+  set<string> available_blobs; // 保存所有当前可用的top blob名称，如果已作为其他层的bottom blob
+                               // ，会从这个集合中删去。保证所有blob只被连接一次
   memory_used_ = 0;
   // For each layer, set up its input and output
+  // 相关vector调整空间大小
   bottom_vecs_.resize(param.layer_size());
   top_vecs_.resize(param.layer_size());
   bottom_id_vecs_.resize(param.layer_size());
   param_id_vecs_.resize(param.layer_size());
   top_id_vecs_.resize(param.layer_size());
   bottom_need_backward_.resize(param.layer_size());
+  // 对网络中的每层，建立层和blob，并连接起来
   for (int layer_id = 0; layer_id < param.layer_size(); ++layer_id) {
     // For non-root solvers, whether this layer is shared from root_net_.
+    // 如果不是root solver且该层需要share
     bool share_from_root = !Caffe::root_solver()
         && root_net_->layers_[layer_id]->ShareInParallel();
     // Inherit phase from net if unset.
+    // layer从net中继承phase信息
     if (!param.layer(layer_id).has_phase()) {
       param.mutable_layer(layer_id)->set_phase(phase_);
     }
     // Setup layer.
+    // ****** 新建或共享layer，将layer的指针保存在layers_里
     const LayerParameter& layer_param = param.layer(layer_id);
-    if (layer_param.propagate_down_size() > 0) {
+    if (layer_param.propagate_down_size() > 0) { // propagate_down时一个数组，保存layer的每个bottom blob是否在BP时需要计算梯度。可以为空
       CHECK_EQ(layer_param.propagate_down_size(),
           layer_param.bottom_size())
           << "propagate_down param must be specified "
           << "either 0 or bottom_size times ";
     }
     if (share_from_root) {
+      // 如果需要从root共享此层，则将root net的相应层的指针加到本地net的layers_指针数组中
       LOG(INFO) << "Sharing layer " << layer_param.name() << " from root net";
       layers_.push_back(root_net_->layers_[layer_id]);
-      layers_[layer_id]->SetShared(true);
+      layers_[layer_id]->SetShared(true); // 是否shared的信息保存在每个layer里
     } else {
+      // 不需要共享，新建层，并保存指针
       layers_.push_back(LayerRegistry<Dtype>::CreateLayer(layer_param));
     }
+    // 保存该层的名称
     layer_names_.push_back(layer_param.name());
     LOG_IF(INFO, Caffe::root_solver())
         << "Creating Layer " << layer_param.name();
-    bool need_backward = false;
+    bool need_backward = false; // 根据layer的blob的BP标识决定layer的BP标识
 
+    // ****** 新建所有的blob并连接
     // Figure out this layer's input and output
+    // 添加本层的所有bottom blob
     for (int bottom_id = 0; bottom_id < layer_param.bottom_size();
          ++bottom_id) {
       const int blob_id = AppendBottom(param, layer_id, bottom_id,
                                        &available_blobs, &blob_name_to_idx);
       // If a blob needs backward, this layer should provide it.
+      // 如果在layer的propagate_down指定了响应的BP标识为true，则layer的BP标识也为true
       need_backward |= blob_need_backward_[blob_id];
     }
     int num_top = layer_param.top_size();
+    // 添加本层的所有top blob
     for (int top_id = 0; top_id < num_top; ++top_id) {
       AppendTop(param, layer_id, top_id, &available_blobs, &blob_name_to_idx);
       // Collect Input layer tops as Net inputs.
+      // 如果是InputLayer，将刚刚添加的top blob作为net input blobs
       if (layer_param.type() == "Input") {
-        const int blob_id = blobs_.size() - 1;
+        const int blob_id = blobs_.size() - 1;// 刚刚添加的blob的ID
         net_input_blob_indices_.push_back(blob_id);
         net_input_blobs_.push_back(blobs_[blob_id].get());
       }
@@ -122,6 +145,7 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
     // If the layer specifies that AutoTopBlobs() -> true and the LayerParameter
     // specified fewer than the required number (as specified by
     // ExactNumTopBlobs() or MinTopBlobs()), allocate them here.
+    // 添加本层自动的top blob
     Layer<Dtype>* layer = layers_[layer_id].get();
     if (layer->AutoTopBlobs()) {
       const int needed_num_top =
@@ -130,10 +154,16 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
         // Add "anonymous" top blobs -- do not modify available_blobs or
         // blob_name_to_idx as we don't want these blobs to be usable as input
         // to other layers.
+        // 添加新的自动blob，自动blob会注册到Net的blobs_,top_vecs_中，但不会添加到本地的blob注册字典和集合中
+        // 所以这些自动blob不会被其他layer连接使用
         AppendTop(param, layer_id, num_top, NULL, NULL);
       }
     }
     // After this layer is connected, set it up.
+    // 本层的layer和相关blob都已经建立好后，将blob的数据reshape
+    // 如果是share layer，把所有blob按照root net的大小reshape
+    // 如果不是，调用layer的SetUp去reshape
+    // 注意reshape后blob已经登记了大小，但实际的SyncedMemory还是没有分配内存
     if (share_from_root) {
       // Set up size of top blobs using root_net_
       const vector<Blob<Dtype>*>& base_top = root_net_->top_vecs_[layer_id];
@@ -149,8 +179,11 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
     }
     LOG_IF(INFO, Caffe::root_solver())
         << "Setting up " << layer_names_[layer_id];
+    // 对本层的所有top blob，更新blob_loss_weights_，并计算需要的blob内存大小
     for (int top_id = 0; top_id < top_vecs_[layer_id].size(); ++top_id) {
       if (blob_loss_weights_.size() <= top_id_vecs_[layer_id][top_id]) {
+        // 将blob_loss_weights_调整为当前的top blob在Net的blobs_里的序号+1的大小
+        // 最终会变成和Net的blobs_一样大？？除非后面有一些auto blobs
         blob_loss_weights_.resize(top_id_vecs_[layer_id][top_id] + 1, Dtype(0));
       }
       blob_loss_weights_[top_id_vecs_[layer_id][top_id]] = layer->loss(top_id);
@@ -164,23 +197,26 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
     }
     LOG_IF(INFO, Caffe::root_solver())
         << "Memory required for data: " << memory_used_ * sizeof(Dtype);
-    const int param_size = layer_param.param_size();
-    const int num_param_blobs = layers_[layer_id]->blobs().size();
+    const int param_size = layer_param.param_size(); // layer_param里param参数的个数
+    const int num_param_blobs = layers_[layer_id]->blobs().size(); // layer内部的blobs，用于存储learnable parameters
     CHECK_LE(param_size, num_param_blobs)
         << "Too many params specified for layer " << layer_param.name();
     ParamSpec default_param_spec;
+    // 根据内部param的lr_mult()参数设置layer内部的param是否需要计算梯度
     for (int param_id = 0; param_id < num_param_blobs; ++param_id) {
       const ParamSpec* param_spec = (param_id < param_size) ?
           &layer_param.param(param_id) : &default_param_spec;
       const bool param_need_backward = param_spec->lr_mult() != 0;
-      need_backward |= param_need_backward;
+      need_backward |= param_need_backward; // 如果param需要BP，则该层也需要BP
       layers_[layer_id]->set_param_propagate_down(param_id,
                                                   param_need_backward);
     }
+    // 注册layer的param blob到Net中
     for (int param_id = 0; param_id < num_param_blobs; ++param_id) {
       AppendParam(param, layer_id, param_id);
     }
     // Finally, set the backward flag
+    // 标示layer是否需要BP，如果需要，则它的所有top blob也需要BP
     layer_need_backward_.push_back(need_backward);
     if (need_backward) {
       for (int top_id = 0; top_id < top_id_vecs_[layer_id].size(); ++top_id) {
@@ -194,6 +230,7 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
   // Also checks if all bottom blobs don't need backward computation (possible
   // because the skip_propagate_down param) and so we can skip bacward
   // computation for the entire layer
+  // 从后往前设置需要计算loss和需要BP的blob
   set<string> blobs_under_loss;
   set<string> blobs_skip_backp;
   for (int layer_id = layers_.size() - 1; layer_id >= 0; --layer_id) {
@@ -265,6 +302,7 @@ void Net<Dtype>::Init(const NetParameter& in_param) {
     }
   }
   // In the end, all remaining blobs are considered output blobs.
+  // 所有没有被作为bottom blob的blob都作为Net的output blob
   for (set<string>::iterator it = available_blobs.begin();
       it != available_blobs.end(); ++it) {
     LOG_IF(INFO, Caffe::root_solver())
@@ -389,18 +427,29 @@ bool Net<Dtype>::StateMeetsRule(const NetState& state,
 }
 
 // Helper for Net::Init: add a new top blob to the net.
+// 添加一个top blob到网络中，函数会增加一个blob，这个blob会注册到Net的blobs_，top_vecs_等中
+// 如果不是自动blob，还会修改本地blob注册信息供其他层连接使用，如果是自动blob，则通过传入NULL
+// 的available_blobs，blob_name_to_idx避免在本地blob信息中注册
+// 
+// layer_id：这个blob所在layer在net中的序号
+// top_id：这个blob在layer的top blob列表中的序号
+// available_blobs：blob注册集合，添加自动blob时为NULL
+// blob_name_to_idx：blob注册后的名称/id字典，添加自动blob时为NULL
 template <typename Dtype>
 void Net<Dtype>::AppendTop(const NetParameter& param, const int layer_id,
                            const int top_id, set<string>* available_blobs,
                            map<string, int>* blob_name_to_idx) {
+  // 用一个普通new返回的指针初始化一个shared_ptr指针
   shared_ptr<LayerParameter> layer_param(
       new LayerParameter(param.layer(layer_id)));
+  // auto的blob统一命名
   const string& blob_name = (layer_param->top_size() > top_id) ?
       layer_param->top(top_id) : "(automatic)";
   // Check if we are doing in-place computation
   if (blob_name_to_idx && layer_param->bottom_size() > top_id &&
       blob_name == layer_param->bottom(top_id)) {
     // In-place computation
+    // 检查是否是in place计算的layer的blob。如果是就使用对应的bottom blob的数据
     LOG_IF(INFO, Caffe::root_solver())
         << layer_param->name() << " -> " << blob_name << " (in-place)";
     top_vecs_[layer_id].push_back(blobs_[(*blob_name_to_idx)[blob_name]].get());
@@ -409,26 +458,36 @@ void Net<Dtype>::AppendTop(const NetParameter& param, const int layer_id,
              blob_name_to_idx->find(blob_name) != blob_name_to_idx->end()) {
     // If we are not doing in-place computation but have duplicated blobs,
     // raise an error.
+    // 如果有同名的top blob，则报错
     LOG(FATAL) << "Top blob '" << blob_name
                << "' produced by multiple sources.";
   } else {
     // Normal output.
+    // 新增top blob
     if (Caffe::root_solver()) {
       LOG(INFO) << layer_param->name() << " -> " << blob_name;
     }
     shared_ptr<Blob<Dtype> > blob_pointer(new Blob<Dtype>());
-    const int blob_id = blobs_.size();
+    const int blob_id = blobs_.size(); // 用添加到blobs_里的顺序作为这个blob的ID
     blobs_.push_back(blob_pointer);
     blob_names_.push_back(blob_name);
-    blob_need_backward_.push_back(false);
+    blob_need_backward_.push_back(false);// 初始化时，blob的BP标志都是false
+    // 只有新增的blob需要添加到本地的blob字典中，自动blob不会添加到本地blob注册信息中
     if (blob_name_to_idx) { (*blob_name_to_idx)[blob_name] = blob_id; }
     top_id_vecs_[layer_id].push_back(blob_id);
     top_vecs_[layer_id].push_back(blob_pointer.get());
   }
+  // 重复添加blob的字符串不影响,自动blob不会修改本地blob注册信息
   if (available_blobs) { available_blobs->insert(blob_name); }
 }
 
 // Helper for Net::Init: add a new bottom blob to the net.
+// 添加一个已经在Net的blobs_中注册的blob作为bottom blob连接到网络中，并更新Net
+// 的bottom_vecs_相关的信息,每个已注册的blob只能作为bottom blob一次
+// layer_id：这个blob所在layer在net中的序号
+// bottom_id：这个blob在layer的bottom blob列表中的序号
+// available_blobs：已经注册过的blob名称，用于判断是否存在，作为bottom blob后会从集合中删去
+// blob_name_to_idx：按照名称查找blob在blob注册数组中的id
 template <typename Dtype>
 int Net<Dtype>::AppendBottom(const NetParameter& param, const int layer_id,
     const int bottom_id, set<string>* available_blobs,
@@ -444,9 +503,10 @@ int Net<Dtype>::AppendBottom(const NetParameter& param, const int layer_id,
       << layer_names_[layer_id] << " <- " << blob_name;
   bottom_vecs_[layer_id].push_back(blobs_[blob_id].get());
   bottom_id_vecs_[layer_id].push_back(blob_id);
-  available_blobs->erase(blob_name);
+  available_blobs->erase(blob_name); // 每个blob只被使用一次
   bool need_backward = blob_need_backward_[blob_id];
   // Check if the backpropagation on bottom_id should be skipped
+  // 检查layer参数里是否指定了是否强制BP这个blob
   if (layer_param.propagate_down_size() > 0) {
     need_backward = layer_param.propagate_down(bottom_id);
   }
@@ -454,6 +514,7 @@ int Net<Dtype>::AppendBottom(const NetParameter& param, const int layer_id,
   return blob_id;
 }
 
+// 新增Net的param的blob，注册在Net的params_中
 template <typename Dtype>
 void Net<Dtype>::AppendParam(const NetParameter& param, const int layer_id,
                              const int param_id) {
@@ -461,6 +522,7 @@ void Net<Dtype>::AppendParam(const NetParameter& param, const int layer_id,
   const int param_size = layer_param.param_size();
   string param_name =
       (param_size > param_id) ? layer_param.param(param_id).name() : "";
+  // 如果param没有名字，用在layer中的序号作为名字
   if (param_name.size()) {
     param_display_names_.push_back(param_name);
   } else {

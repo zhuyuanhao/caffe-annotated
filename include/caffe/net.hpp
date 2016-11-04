@@ -251,15 +251,19 @@ class Net {
   void UpdateDebugInfo(const int param_id);
 
   /// @brief The network name
+  // 网络名
   string name_;
   /// @brief The phase: TRAIN or TEST
+  // 网络状态的phase
   Phase phase_;
   /// @brief Individual layers in the net
+  // 网络中的layer相关的指针数组、名称数组、是否需要BP的标志，layer的名称/序号的字典
   vector<shared_ptr<Layer<Dtype> > > layers_;
   vector<string> layer_names_;
   map<string, int> layer_names_index_;
   vector<bool> layer_need_backward_;
   /// @brief the blobs storing intermediate results between the layer.
+  // blob相关的指针数组、名称数组、是否需要BP的标志，blob名称/序号的字典
   vector<shared_ptr<Blob<Dtype> > > blobs_;
   vector<string> blob_names_;
   map<string, int> blob_names_index_;
@@ -267,14 +271,18 @@ class Net {
   /// bottom_vecs stores the vectors containing the input for each layer.
   /// They don't actually host the blobs (blobs_ does), so we simply store
   /// pointers.
+  // 按序存储每一层的所有bottom blob的指针、ID、是否BP的标志
+  // blob的ID实际上是在blobs_里下标
   vector<vector<Blob<Dtype>*> > bottom_vecs_;
   vector<vector<int> > bottom_id_vecs_;
   vector<vector<bool> > bottom_need_backward_;
   /// top_vecs stores the vectors containing the output for each layer
+  // 按序存储每一层的所有top blob的指针、ID
   vector<vector<Blob<Dtype>*> > top_vecs_;
   vector<vector<int> > top_id_vecs_;
   /// Vector of weight in the loss (or objective) function of each net blob,
   /// indexed by blob_id.
+  // 存储登记的blobs_在layer中设置的loss值
   vector<Dtype> blob_loss_weights_;
   vector<vector<int> > param_id_vecs_;
   vector<int> param_owners_;
@@ -282,11 +290,13 @@ class Net {
   vector<pair<int, int> > param_layer_indices_;
   map<string, int> param_names_index_;
   /// blob indices for the input and the output of the net
+  // 整个Net的input和output blobs相关的序号的blobs指针
   vector<int> net_input_blob_indices_;
   vector<int> net_output_blob_indices_;
   vector<Blob<Dtype>*> net_input_blobs_;
   vector<Blob<Dtype>*> net_output_blobs_;
   /// The parameters in the network.
+  // 所有的param blob的指针数组
   vector<shared_ptr<Blob<Dtype> > > params_;
   vector<Blob<Dtype>*> learnable_params_;
   /**
