@@ -32,6 +32,7 @@ void BaseDataLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
   DataLayerSetUp(bottom, top);
 }
 
+// 初始化用于多线程预取的BlockingQueue对象，数组对象已经在声明时生成
 template <typename Dtype>
 BasePrefetchingDataLayer<Dtype>::BasePrefetchingDataLayer(
     const LayerParameter& param)
@@ -42,6 +43,8 @@ BasePrefetchingDataLayer<Dtype>::BasePrefetchingDataLayer(
   }
 }
 
+// 调用父类初始化来初始化transformer对象，调用blob的函数以分配预取队列的存储空间，
+// 然后启动子线程
 template <typename Dtype>
 void BasePrefetchingDataLayer<Dtype>::LayerSetUp(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {
@@ -50,6 +53,8 @@ void BasePrefetchingDataLayer<Dtype>::LayerSetUp(
   // calls so that the prefetch thread does not accidentally make simultaneous
   // cudaMalloc calls when the main thread is running. In some GPUs this
   // seems to cause failures if we do not so.
+  // 调用blob的cpu/gpu_data()，使它们分配存储空间
+  // 如果让子线程去分配GPU的空间，有可能会出错
   for (int i = 0; i < PREFETCH_COUNT; ++i) {
     prefetch_[i].data_.mutable_cpu_data();
     if (this->output_labels_) {
@@ -72,6 +77,9 @@ void BasePrefetchingDataLayer<Dtype>::LayerSetUp(
   DLOG(INFO) << "Prefetch initialized.";
 }
 
+// 子线程函数，不断从prefetch_free_中取一个块，读取数据存入这个块，
+// 然后将块挂入prefetch_full_中，如果时GPU模式，块中的数据用异步发送
+// 已经存入了GPU内存中
 template <typename Dtype>
 void BasePrefetchingDataLayer<Dtype>::InternalThreadEntry() {
 #ifndef CPU_ONLY
@@ -87,6 +95,7 @@ void BasePrefetchingDataLayer<Dtype>::InternalThreadEntry() {
       load_batch(batch);
 #ifndef CPU_ONLY
       if (Caffe::mode() == Caffe::GPU) {
+        // 调用缓存blob的data变量对应的SyncedMemory的异步GPU传输函数
         batch->data_.data().get()->async_gpu_push(stream);
         CUDA_CHECK(cudaStreamSynchronize(stream));
       }
@@ -103,6 +112,7 @@ void BasePrefetchingDataLayer<Dtype>::InternalThreadEntry() {
 #endif
 }
 
+// CPU Forward，需要把数据从缓存块中读出来，并存入到top blob中
 template <typename Dtype>
 void BasePrefetchingDataLayer<Dtype>::Forward_cpu(
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top) {

@@ -15,6 +15,7 @@ namespace caffe {
  * @brief Computes the classification accuracy for a one-of-many
  *        classification task.
  */
+// 输出分类（预测）精确度，只有test阶段才有，需要加入include参数。
 template <typename Dtype>
 class AccuracyLayer : public Layer<Dtype> {
  public:

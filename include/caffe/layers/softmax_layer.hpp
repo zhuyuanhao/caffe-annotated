@@ -14,6 +14,7 @@ namespace caffe {
  *
  * TODO(dox): thorough documentation for Forward, Backward, and proto params.
  */
+// 输出似然值，即类别的概率，不计算loss
 template <typename Dtype>
 class SoftmaxLayer : public Layer<Dtype> {
  public:

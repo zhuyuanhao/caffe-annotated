@@ -15,6 +15,7 @@
 namespace caffe {
 
 /// @brief Fills a Blob with constant or randomly-generated data.
+// 使用特定规则填充Blob里的数据，只在初始化blob时使用
 template <typename Dtype>
 class Filler {
  public:

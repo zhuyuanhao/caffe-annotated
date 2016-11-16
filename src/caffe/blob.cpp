@@ -22,7 +22,8 @@ void Blob<Dtype>::Reshape(const int num, const int channels, const int height,
 // 根据shape的大小，修改内部的数据
 // 重新设置内部的count,capacity,shape_,shape_data_
 // 根据数据容量大小判断是否要重新申请shape_data_,data_/diff_的SyncedMemory
-// 注意此时重新申请的data_/diff_内部的SyncedMemory是没有申请内存的
+// 注意此时重新申请的data_/diff_内部的SyncedMemory是没有申请内存的，只有到
+// 真正用[mutable_]cpu/gpu_data()时才会申请相应内存
 template <typename Dtype>
 void Blob<Dtype>::Reshape(const vector<int>& shape) {
   CHECK_LE(shape.size(), kMaxBlobAxes);
@@ -32,7 +33,7 @@ void Blob<Dtype>::Reshape(const vector<int>& shape) {
     shape_data_.reset(new SyncedMemory(shape.size() * sizeof(int)));
   }
   int* shape_data = static_cast<int*>(shape_data_->mutable_cpu_data());
-  // 重置数据大小
+  // 重置blob的大小、维度数据
   for (int i = 0; i < shape.size(); ++i) {
     CHECK_GE(shape[i], 0);
     if (count_ != 0) {
@@ -156,6 +157,8 @@ void Blob<Dtype>::ShareDiff(const Blob& other) {
 // The "update" method is used for parameter blobs in a Net, which are stored
 // as Blob<float> or Blob<double> -- hence we do not define it for
 // Blob<int> or Blob<unsigned int>.
+// 实例化int和unsigned int类型的Update()，使用NOT_IMPLEMENTED来报错，这保证
+// 运行时不会真的调用int或unsigned的模板
 template <> void Blob<unsigned int>::Update() { NOT_IMPLEMENTED; }
 template <> void Blob<int>::Update() { NOT_IMPLEMENTED; }
 
@@ -163,12 +166,14 @@ template <typename Dtype>
 void Blob<Dtype>::Update() {
   // We will perform update based on where the data is located.
   switch (data_->head()) {
+  // 数据只在CPU有，则用CPU的blas实现
   case SyncedMemory::HEAD_AT_CPU:
     // perform computation on CPU
     caffe_axpy<Dtype>(count_, Dtype(-1),
         static_cast<const Dtype*>(diff_->cpu_data()),
         static_cast<Dtype*>(data_->mutable_cpu_data()));
     break;
+  // 数据在GPU有或都有，用CPU的blas实现
   case SyncedMemory::HEAD_AT_GPU:
   case SyncedMemory::SYNCED:
 #ifndef CPU_ONLY
@@ -185,6 +190,7 @@ void Blob<Dtype>::Update() {
   }
 }
 
+// 其他的计算函数，和Update()类似
 template <> unsigned int Blob<unsigned int>::asum_data() const {
   NOT_IMPLEMENTED;
   return 0;

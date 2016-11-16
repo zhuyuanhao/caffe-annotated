@@ -49,6 +49,7 @@ T BlockingQueue<T>::pop(const string& log_on_wait) {
     if (!log_on_wait.empty()) {
       LOG_EVERY_N(INFO, 1000)<< log_on_wait;
     }
+    // 队列为空时，会一直等待。怎么处理mutex和condition_variable的关系???
     sync_->condition_.wait(lock);
   }
 

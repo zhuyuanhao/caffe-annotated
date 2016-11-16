@@ -13,10 +13,10 @@ namespace caffe {
 using boost::weak_ptr;
 
 map<const string, weak_ptr<DataReader::Body> > DataReader::bodies_;
-static boost::mutex bodies_mutex_;
+static boost::mutex bodies_mutex_; // 只有文件作用域？？
 
 DataReader::DataReader(const LayerParameter& param)
-    : queue_pair_(new QueuePair(  //
+    : queue_pair_(new QueuePair(  // prefetch默认值是4
         param.data_param().prefetch() * param.data_param().batch_size())) {
   // Get or create a body
   boost::mutex::scoped_lock lock(bodies_mutex_);
@@ -32,6 +32,7 @@ DataReader::DataReader(const LayerParameter& param)
 
 DataReader::~DataReader() {
   string key = source_key(body_->param_);
+  // 释放本地的body成员，并删除static map中的body成员引用
   body_.reset();
   boost::mutex::scoped_lock lock(bodies_mutex_);
   if (bodies_[key].expired()) {
@@ -39,8 +40,7 @@ DataReader::~DataReader() {
   }
 }
 
-//
-
+// 初始时，所有的Datum都是空的，加到free_队列中
 DataReader::QueuePair::QueuePair(int size) {
   // Initialize the free queue with requested number of datums
   for (int i = 0; i < size; ++i) {
@@ -57,8 +57,6 @@ DataReader::QueuePair::~QueuePair() {
     delete datum;
   }
 }
-
-//
 
 DataReader::Body::Body(const LayerParameter& param)
     : param_(param),
@@ -102,6 +100,7 @@ void DataReader::Body::InternalThreadEntry() {
   }
 }
 
+// 读一个数据，如果到末尾，则下次从第一个开始
 void DataReader::Body::read_one(db::Cursor* cursor, QueuePair* qp) {
   Datum* datum = qp->free_.pop();
   // TODO deserialize in-place instead of copy?

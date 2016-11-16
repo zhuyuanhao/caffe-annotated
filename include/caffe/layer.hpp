@@ -37,6 +37,7 @@ class Layer {
    * to SetUp(), where the dimensions of the bottom blobs are provided to the
    * layer.
    */
+  // 初始化函数，设置phase状态，如果layer自己定义了blob，则初始化。其他主要操作都在SetUp中完成
   explicit Layer(const LayerParameter& param)
     : layer_param_(param), is_shared_(false) {
       // Set phase and copy blobs (if there are any).
@@ -64,6 +65,12 @@ class Layer {
    * Sets up the loss weight multiplier blobs for any non-zero loss weights.
    * This method may not be overridden.
    */
+  // net会调用SetUp()函数进行layer的初始化操作，不同Layer的LayerSetUp()函数是
+  // 不同的。整个SetUp操作的具体步骤为：
+  // 初始化锁，检查bottom blob和top blob的数量
+  // 每个layer实现自己的LayerSetUp
+  // bottom blob时已经shape过的，top blob没有，Reshape函数根据bottom blob来reshape top blob
+  // 如果top blob需要计算loss，则设置loss weight在它的diff数组中
   void SetUp(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
     InitMutex();
@@ -98,12 +105,14 @@ class Layer {
    *        not be shared. data layers should be shared to ensure each worker
    *        solver access data sequentially during data parallelism.
    */
+  // 在数据并行时是否共享layer，默认只有data layer共享
   virtual inline bool ShareInParallel() const { return false; }
 
   /** @brief Return whether this layer is actually shared by other nets.
    *         If ShareInParallel() is true and using more than one GPU and the
    *         net has TRAIN phase, then this function is expected return true.
    */
+  // 是否共享layer，可能是数据并行或其他设置
   inline bool IsShared() const { return is_shared_; }
 
   /** @brief Set whether this layer is actually shared by other nets
@@ -111,7 +120,7 @@ class Layer {
    *         net has TRAIN phase, then is_shared should be set true.
    */
   inline void SetShared(bool is_shared) {
-    CHECK(ShareInParallel() || !is_shared)
+    CHECK(ShareInParallel() || !is_shared) // 如果ShareInParallel()为false而需要设置为true，则报错
         << type() << "Layer does not support sharing.";
     is_shared_ = is_shared;
   }
@@ -319,18 +328,24 @@ class Layer {
 
  protected:
   /** The protobuf that stores the layer parameters */
+  // layer层的参数
   LayerParameter layer_param_;
   /** The phase: TRAIN or TEST */
+  // layer的phase
   Phase phase_;
   /** The vector that stores the learnable parameters as a set of blobs. */
+  // 存储layer内的学习参数的blob指针数组
   vector<shared_ptr<Blob<Dtype> > > blobs_;
   /** Vector indicating whether to compute the diff of each param blob. */
+  // 每个bottom blob是否要计算diff的标志数组
   vector<bool> param_propagate_down_;
 
   /** The vector that indicates whether each top blob has a non-zero weight in
    *  the objective function. */
+  // 每个top blob的loss weight值，非0表示计算loss
   vector<Dtype> loss_;
 
+  // forward时的相关函数
   /** @brief Using the CPU device, compute the layer output. */
   virtual void Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) = 0;
@@ -344,6 +359,7 @@ class Layer {
     return Forward_cpu(bottom, top);
   }
 
+  // backward时的相关函数
   /**
    * @brief Using the CPU device, compute the gradients for any parameters and
    *        for the bottom blobs if propagate_down is true.
@@ -360,7 +376,7 @@ class Layer {
       const vector<bool>& propagate_down,
       const vector<Blob<Dtype>*>& bottom) {
     // LOG(WARNING) << "Using CPU code as backup.";
-    Backward_cpu(top, propagate_down, bottom);
+    Backward_cpu(top, propagate_down, bottom); // 如果没有实现，会调用cpu的BP函数
   }
 
   /**
@@ -368,6 +384,7 @@ class Layer {
    * and top Blobs provided as input match the expected numbers specified by
    * the {ExactNum,Min,Max}{Bottom,Top}Blobs() functions.
    */
+  // 在layer stepup时调用，用于检查top和bottom blob的实际数量是否符合定义的约束
   virtual void CheckBlobCounts(const vector<Blob<Dtype>*>& bottom,
                                const vector<Blob<Dtype>*>& top) {
     if (ExactNumBottomBlobs() >= 0) {
@@ -411,6 +428,7 @@ class Layer {
    * Called by SetUp to initialize the weights associated with any top blobs in
    * the loss function. Store non-zero loss weights in the diff blob.
    */
+  // 将top blob的cpu diff的所有值全部设置为loss_weight
   inline void SetLossWeights(const vector<Blob<Dtype>*>& top) {
     const int num_loss_weights = layer_param_.loss_weight_size();
     if (num_loss_weights) {
@@ -419,7 +437,7 @@ class Layer {
       for (int top_id = 0; top_id < top.size(); ++top_id) {
         const Dtype loss_weight = layer_param_.loss_weight(top_id);
         if (loss_weight == Dtype(0)) { continue; }
-        this->set_loss(top_id, loss_weight);
+        this->set_loss(top_id, loss_weight); // 设置loss_成员中的值
         const int count = top[top_id]->count();
         Dtype* loss_multiplier = top[top_id]->mutable_cpu_diff();
         caffe_set(count, loss_weight, loss_multiplier);
@@ -429,12 +447,15 @@ class Layer {
 
  private:
   /** Whether this layer is actually shared by other nets*/
+  // 处理layer共享时的标志
   bool is_shared_;
 
   /** The mutex for sequential forward if this layer is shared */
+  // layer共享时，forward需要加mutex锁
   shared_ptr<boost::mutex> forward_mutex_;
 
   /** Initialize forward_mutex_ */
+  // 锁相关的函数
   void InitMutex();
   /** Lock forward_mutex_ if this layer is shared */
   void Lock();
@@ -447,6 +468,7 @@ class Layer {
 // Forward and backward wrappers. You should implement the cpu and
 // gpu specific implementations instead, and should not change these
 // functions.
+// Forward和Backward的包装函数，根据当前运行模式，选择对应的cpu/gpu函数执行
 template <typename Dtype>
 inline Dtype Layer<Dtype>::Forward(const vector<Blob<Dtype>*>& bottom,
     const vector<Blob<Dtype>*>& top) {
@@ -457,6 +479,7 @@ inline Dtype Layer<Dtype>::Forward(const vector<Blob<Dtype>*>& bottom,
   switch (Caffe::mode()) {
   case Caffe::CPU:
     Forward_cpu(bottom, top);
+    // 如果top blob需要计算loss，用data·loss_weight（存在diff里）计算loss
     for (int top_id = 0; top_id < top.size(); ++top_id) {
       if (!this->loss(top_id)) { continue; }
       const int count = top[top_id]->count();

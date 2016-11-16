@@ -3,10 +3,12 @@ syntax = "proto2";
 package caffe;
 
 // Specifies the shape (dimensions) of a Blob.
+// Blob的数据块形状格式类，本质上是一维数据，通过坐标转换映射到多维
 message BlobShape {
   repeated int64 dim = 1 [packed = true];
 }
 
+// Blob类的格式类，只支持float或double类型的数据
 message BlobProto {
   optional BlobShape shape = 7;
   repeated float data = 5 [packed = true];
@@ -23,10 +25,20 @@ message BlobProto {
 
 // The BlobProtoVector is simply a way to pass multiple blobproto instances
 // around.
+// Blob数组的格式类
 message BlobProtoVector {
   repeated BlobProto blobs = 1;
 }
 
+// Datum用于存放一个样本（图片或其他数据），可以有三个维度，channels, 
+// height,和width，可以看做是少了num维度的Blob。
+// 存放数据的地方有两个：byte_data和float_data，分别存放uint8整数型和浮点型数据。图
+// 像数据一般是整形，放在byte_data里，特征向量一般是浮点型，放在float_data里。
+// label存放数据的类别标签，是整数型。encoded标识数据是否需要被解码（里面有可能
+// 放的是JPEG或者PNG之类经过编码的数据）。Datum这个数据结构将数据和标签封装在一
+// 起，兼容整形和浮点型数据。经过Protobuf编译后，可以在Python和C++中都提供高效
+// 的访问。同时Protubuf还为它提供了序列化与反序列化的功能。存放进LMDB的就是Datum
+// 序列化生成的字符串。 
 message Datum {
   optional int32 channels = 1;
   optional int32 height = 2;
@@ -40,6 +52,7 @@ message Datum {
   optional bool encoded = 7 [default = false];
 }
 
+// 过滤参数格式类，type时字符串，可以为constanst,uniform,gauss
 message FillerParameter {
   // The filler type.
   optional string type = 1 [default = 'constant'];
@@ -61,6 +74,7 @@ message FillerParameter {
   optional VarianceNorm variance_norm = 8 [default = FAN_IN];
 }
 
+// 网络参数的格式类
 message NetParameter {
   optional string name = 1; // consider giving the network a name
   // DEPRECATED. See InputParameter. The input blobs to the network.
@@ -280,6 +294,7 @@ message NetStateRule {
 
 // Specifies training parameters (multipliers on global learning constants,
 // and the name and other settings used for weight sharing).
+// layer中param参数的格式类，不同的layer定义不同的字段
 message ParamSpec {
   // The names of the parameter blobs -- useful for sharing parameters among
   // layers, but never required otherwise.  To share a parameter between two
@@ -297,6 +312,9 @@ message ParamSpec {
   }
 
   // The multiplier on the global learning rate for this parameter.
+  // 定义layer的学习率的系数，实际lr用solver.prototxt中的base_lr乘以lr_mult得到
+  // 如果有两个定义了lr_mult的param参数，则第一个表示权值的学习率，第二个表示偏置
+  // 的学习率，一般偏置项的学习率是权值学习率的两倍。
   optional float lr_mult = 3 [default = 1.0];
 
   // The multiplier on the global weight decay for this parameter.
@@ -578,6 +596,7 @@ message ConvolutionParameter {
 
   optional uint32 group = 5 [default = 1]; // The group size for group conv
 
+  // 权值和偏置的初始化，可以为常数或gauss等
   optional FillerParameter weight_filler = 7; // The filler for the weight
   optional FillerParameter bias_filler = 8; // The filler for the bias
   enum Engine {

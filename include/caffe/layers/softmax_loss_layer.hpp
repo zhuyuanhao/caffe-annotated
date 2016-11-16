@@ -40,6 +40,7 @@ namespace caffe {
  *        \frac{-1}{N} \sum\limits_{n=1}^N \log(\hat{p}_{n,l_n})
  *      @f$, for softmax output class probabilites @f$ \hat{p} @f$
  */
+// 由概率似然值求得loss值
 template <typename Dtype>
 class SoftmaxWithLossLayer : public LossLayer<Dtype> {
  public:

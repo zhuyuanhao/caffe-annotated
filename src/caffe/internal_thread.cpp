@@ -19,6 +19,7 @@ bool InternalThread::must_stop() {
 }
 
 void InternalThread::StartInternalThread() {
+  // 不能重复调用Start函数，线程必须未初始化，或已经停止
   CHECK(!is_started()) << "Threads should persist and not be restarted.";
 
   int device = 0;
@@ -31,6 +32,7 @@ void InternalThread::StartInternalThread() {
   bool root_solver = Caffe::root_solver();
 
   try {
+    // 将当前线程的Caffe的部分状态传给子线程
     thread_.reset(new boost::thread(&InternalThread::entry, this, device, mode,
           rand_seed, solver_count, root_solver));
   } catch (std::exception& e) {
@@ -38,6 +40,7 @@ void InternalThread::StartInternalThread() {
   }
 }
 
+// 子线程执行的函数，设置Caffe的部分状态，然后执行InternalThreadEntry()
 void InternalThread::entry(int device, Caffe::Brew mode, int rand_seed,
     int solver_count, bool root_solver) {
 #ifndef CPU_ONLY
@@ -52,7 +55,9 @@ void InternalThread::entry(int device, Caffe::Brew mode, int rand_seed,
 }
 
 void InternalThread::StopInternalThread() {
+  // 可以重复调用停止函数
   if (is_started()) {
+    // 产生终止信号停止线程中函数的执行
     thread_->interrupt();
     try {
       thread_->join();

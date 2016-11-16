@@ -21,13 +21,17 @@ namespace caffe {
  *
  * TODO(dox): more thorough description.
  */
+// Blob内部使用SyncedMemory保存数据以及保证在CPU和GPU的数据传输，SyncedMemory本身是一维的
+// 数组，Blob通过下标映射的方式将多维的下标和一维下标做转换 
 template <typename Dtype>
 class Blob {
  public:
   Blob()
        : data_(), diff_(), count_(0), capacity_(0) {}
 
-  // Blob内部会调用Reshape申请SyncedMemory，此时的SyncedMemory内部是没有申请cpu/gpu内存的
+  // Blob内部会调用Reshape申请SyncedMemory，此时的SyncedMemory内部是没有申请cpu/gpu内存的，
+  // 只有在调用了一次[mutable_]cpu/gpu_data()后才会申请内存
+  // explicit关键字的是禁止构造函数用于隐式转换
   /// @brief Deprecated; use <code>Blob(const vector<int>& shape)</code>.
   explicit Blob(const int num, const int channels, const int height,
       const int width);
@@ -50,6 +54,10 @@ class Blob {
    * an error; either Net::Forward or Net::Reshape need to be called to
    * propagate the new input shape to higher layers.
    */
+  // reshape用于调整blob的形状，只有在新形状的大小超过原形状时，才重新分配SyncedMemory
+  // 同时释放旧SyncedMemory(通过shared_ptr自动完成)，此时新的SyncedMemory还未分配内存。
+  // reshape在Blob初始化，Layer::Reshape, Layer::Forward的时候都会用到，用于修改Top blob
+  // 的大小。
   void Reshape(const vector<int>& shape);
   void Reshape(const BlobShape& shape);
   void ReshapeLike(const Blob& other);
@@ -123,6 +131,7 @@ class Blob {
    *        the second to last if index == -2, etc.
    *        Dies on out of range index.
    */
+  // 检查索引正确性,并将负值索引映射为正值索引
   inline int CanonicalAxisIndex(int axis_index) const {
     CHECK_GE(axis_index, -num_axes())
         << "axis " << axis_index << " out of range for " << num_axes()
@@ -158,7 +167,7 @@ class Blob {
     return shape(index);
   }
 
-  // 将blob的多维坐标转换为实际的一维坐标
+  // 计算多维下的偏移量的实际偏移
   inline int offset(const int n, const int c = 0, const int h = 0,
       const int w = 0) const {
     CHECK_GE(n, 0);
@@ -194,6 +203,8 @@ class Blob {
    *        of other (and die otherwise); if true, Reshape this Blob to other's
    *        shape if necessary
    */
+  // 从其他blob拷贝data_或者diff_，通过copy_diff判断是只拷贝data_还是只拷贝diff_
+  // reshape判断是否修改维度，如果不修改但count_不一致，会报错
   void CopyFrom(const Blob<Dtype>& source, bool copy_diff = false,
       bool reshape = false);
 
@@ -230,7 +241,7 @@ class Blob {
   // 返回cpu/gpu_data/diff实际数据的一维指针
   const Dtype* cpu_data() const;
   void set_cpu_data(Dtype* data);
-  // 返回blob维度大小在gpu上的内存指针
+  // 返回blob shape在gpu上的内存指针
   const int* gpu_shape() const;
   const Dtype* gpu_data() const;
   const Dtype* cpu_diff() const;
@@ -272,6 +283,7 @@ class Blob {
    * This deallocates the SyncedMemory holding this Blob's data_, as
    * shared_ptr calls its destructor when reset with the "=" operator.
    */
+  // 共享其他blob的data_，直接让自己的data_指向other.data_
   void ShareData(const Blob& other);
   /**
    * @brief Set the diff_ shared_ptr to point to the SyncedMemory holding the
@@ -281,6 +293,7 @@ class Blob {
    * This deallocates the SyncedMemory holding this Blob's diff_, as
    * shared_ptr calls its destructor when reset with the "=" operator.
    */
+   // 共享其他blob的diff_，直接让自己的data_指向other.diff_
   void ShareDiff(const Blob& other);
 
   // 判断两个blob的大小是否一致

@@ -6,6 +6,7 @@
 
 namespace caffe {
 
+//实现一个阻塞队列，保证多线程情况下也能正常操作队列结构
 template<typename T>
 class BlockingQueue {
  public:
@@ -32,6 +33,7 @@ class BlockingQueue {
    to avoid a boost/NVCC issues (#1009, #1010) on OSX. Also fails on
    Linux CUDA 7.0.18.
    */
+  // 用sync类单独保存mutex和condition_variable成员
   class sync;
 
   std::queue<T> queue_;

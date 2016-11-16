@@ -52,6 +52,11 @@ namespace caffe {
 template <typename Dtype>
 class Layer;
 
+// Layer的注册类，和SolverRegistry基本相同
+// 使用一个static的字典存储layer名和对应的creator函数
+// 注册时，传入类名中不含Layer的部分，如class SoftmaxLayer使用REGISTER_LAYER_CLASS(Softmax);
+// 会生成一个SoftmaxLayer的creator类，然后将"Softmax",creator 注册到static字典中
+// 使用时，用LayerRegistry<Dtype>::CreateLayer("Softmax");会返回SoftmaxLayer的一个对象的指针
 template <typename Dtype>
 class LayerRegistry {
  public:
@@ -59,11 +64,12 @@ class LayerRegistry {
   typedef std::map<string, Creator> CreatorRegistry;
 
   static CreatorRegistry& Registry() {
-    static CreatorRegistry* g_registry_ = new CreatorRegistry();
+    static CreatorRegistry* g_registry_ = new CreatorRegistry(); // 使用函数内部静态变量作为所有layer的注册字典
     return *g_registry_;
   }
 
   // Adds a creator.
+  // 在static字典中注册
   static void AddCreator(const string& type, Creator creator) {
     CreatorRegistry& registry = Registry();
     CHECK_EQ(registry.count(type), 0)
@@ -72,6 +78,7 @@ class LayerRegistry {
   }
 
   // Get a layer using a LayerParameter.
+  // 查询字典，根据layer.name()调用相应的creator，返回一个layer对象的指针
   static shared_ptr<Layer<Dtype> > CreateLayer(const LayerParameter& param) {
     if (Caffe::root_solver()) {
       LOG(INFO) << "Creating layer " << param.name();
@@ -112,7 +119,7 @@ class LayerRegistry {
   }
 };
 
-
+// 注册宏使用的注册类，在初始化函数中注册
 template <typename Dtype>
 class LayerRegisterer {
  public:
@@ -123,11 +130,12 @@ class LayerRegisterer {
   }
 };
 
-
+// 将layer和对应的creator注册
 #define REGISTER_LAYER_CREATOR(type, creator)                                  \
   static LayerRegisterer<float> g_creator_f_##type(#type, creator<float>);     \
   static LayerRegisterer<double> g_creator_d_##type(#type, creator<double>)    \
 
+// 先新建一个layer的creator，然后调用上面的宏注册
 #define REGISTER_LAYER_CLASS(type)                                             \
   template <typename Dtype>                                                    \
   shared_ptr<Layer<Dtype> > Creator_##type##Layer(const LayerParameter& param) \

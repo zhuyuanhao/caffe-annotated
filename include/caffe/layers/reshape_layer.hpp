@@ -15,6 +15,7 @@ namespace caffe {
  * Note: similarly to FlattenLayer, this layer does not change the input values
  * (see FlattenLayer, Blob::ShareData and Blob::ShareDiff).
  */
+// 在不改变数据的情况下，改变输入的维度
 template <typename Dtype>
 class ReshapeLayer : public Layer<Dtype> {
  public:
