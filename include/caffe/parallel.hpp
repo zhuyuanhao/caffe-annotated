@@ -19,6 +19,8 @@ namespace caffe {
 // Represents a net parameters. Once a net is created, its parameter buffers can
 // be replaced by ones from Params, to allow parallelization. Params ensures
 // parameters are allocated in one consecutive array.
+// 保存solver->net()->learnable_params()的blob的实际内存。分配一大块内存，然后将blobs
+// 的data_和diff_的实际内存指向大块内存中的一段
 template<typename Dtype>
 class Params {
  public:
